@@ -23,6 +23,7 @@ def generate(
     device=None,
     idle_device=None,
     tokenizer=None,
+    step_callback=None,
 ):
     with torch.no_grad():
         if not 0 < strength <= 1:
@@ -49,30 +50,45 @@ def generate(
 
         if do_cfg:
             # Convert into a list of length Seq_Len=77
-            cond_tokens = tokenizer.batch_encode_plus(
-                [prompt], padding="max_length", max_length=77, truncation=True
+            cond_tokens = tokenizer(
+                [prompt],
+                padding="max_length",
+                max_length=77,
+                truncation=True,
+                return_tensors="pt",
+                add_special_tokens=True,
             ).input_ids
 
-            cond_tokens = torch.tensor(cond_tokens, dtype=torch.long, device=device)
+            cond_tokens = cond_tokens.to(device)
             # (Batch_Size, Seq_Len) -> (Batch_Size, Seq_Len, Dim)
             cond_context = clip(cond_tokens)
 
-            uncond_tokens = tokenizer.batch_encode_plus(
-                [uncond_prompt], padding="max_length", max_length=77, truncation=True
+            uncond_tokens = tokenizer(
+                [uncond_prompt if uncond_prompt else ""],
+                padding="max_length",
+                max_length=77,
+                truncation=True,
+                return_tensors="pt",
+                add_special_tokens=True,
             ).input_ids
 
-            uncond_tokens = torch.tensor(uncond_tokens, dtype=torch.long, device=device)
+            uncond_tokens = uncond_tokens.to(device)
             # (Batch_Size, Seq_Len) -> (Batch_Size, Seq_Len, Dim)
             uncond_context = clip(uncond_tokens)
             # (Batch_Size, Seq_Len, Dim) + (Batch_Size, Seq_Len, Dim)
             # -> (2 * Batch_Size, Seq_Len, Dim)
             context = torch.cat([cond_context, uncond_context])
         else:
-            tokens = tokenizer.batch_encode_plus(
-                [prompt], padding="max_length", max_length=77, truncation=True
+            tokens = tokenizer(
+                [prompt],
+                padding="max_length",
+                max_length=77,
+                truncation=True,
+                return_tensors="pt",
+                add_special_tokens=True,
             ).input_ids
 
-            tokens = torch.tensor(tokens, dtype=torch.long, device=device)
+            tokens = tokens.to(device)
             # (Batch_Size, Seq_Len) -> (Batch_Size, Seq_Len, Dim)
             context = clip(tokens)
         to_idle(clip)
@@ -99,7 +115,7 @@ def generate(
             # (Height, Width, Channel) -> (Batch_Size, Height, Width, Channel)
             input_image_tensor = input_image_tensor.unsqueeze(0)
 
-            # (Batch_Size, Height, Width, Channel) 
+            # (Batch_Size, Height, Width, Channel)
             # -> (Batch_Size, Channel, Height, Width)
             input_image_tensor = input_image_tensor.permute(0, 3, 1, 2)
 
@@ -131,7 +147,7 @@ def generate(
             model_input = latents
 
             if do_cfg:
-                # (Batch_Size, 4, Latents_Height, Latents_Width) 
+                # (Batch_Size, 4, Latents_Height, Latents_Width)
                 # -> (2 * Batch_Size, 4, Latents_Height, Latents_Width)
                 model_input = model_input.repeat(2, 1, 1, 1)
 
@@ -145,6 +161,9 @@ def generate(
 
             # (Batch_Size, 4, Latents_Height, Latents_Width) -> (Batch_Size, 4, Latents_Height, Latents_Width)
             latents = sampler.step(timestep, latents, model_output)
+
+            if step_callback:
+                step_callback(i, timestep.item(), latents)
 
         to_idle(diffusion)
 
