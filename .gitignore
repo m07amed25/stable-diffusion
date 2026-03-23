@@ -1,0 +1,7 @@
+data/*
+__pycache__/
+*.ckpt
+output/
+images/
+*.pdf
+.ipynb_checkpoints/
